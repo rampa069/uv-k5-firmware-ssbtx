@@ -707,6 +707,11 @@ void UI_DisplayMain(void)
 				String[0] = 'N';
 				String[1] = '\0';
 			}
+			else if (gEeprom.VfoInfo[vfo_num].CHANNEL_BANDWIDTH == BANDWIDTH_NARROWER)
+			{
+				String[0] = 'n';
+				String[1] = '\0';
+			}
 			UI_PrintStringSmall(String, LCD_WIDTH + 70, 0, line + 1);
 		}
 

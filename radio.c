@@ -242,6 +242,7 @@ void RADIO_ConfigureChannel(const unsigned int VFO, const unsigned int configure
 
 		// ***************
 
+		// Read channel configuration from EEPROM (8 bytes)
 		EEPROM_ReadBuffer(base + 8, data, sizeof(data));
 
 		tmp = data[3] & 0x0F;
@@ -326,7 +327,7 @@ void RADIO_ConfigureChannel(const unsigned int VFO, const unsigned int configure
 		{
 			const uint8_t d4 = data[4];
 			pVfo->FrequencyReverse  = !!((d4 >> 0) & 1u);
-			pVfo->CHANNEL_BANDWIDTH = !!((d4 >> 1) & 1u);
+			pVfo->CHANNEL_BANDWIDTH = (d4 >> 1) & 3u;
 			pVfo->OUTPUT_POWER      =   ((d4 >> 2) & 3u);
 			pVfo->BUSY_CHANNEL_LOCK = !!((d4 >> 4) & 1u);
 		}
@@ -352,6 +353,7 @@ void RADIO_ConfigureChannel(const unsigned int VFO, const unsigned int configure
 			uint32_t Frequency;
 			uint32_t Offset;
 		} __attribute__((packed)) info;
+		// Read frequency and offset from EEPROM
 		EEPROM_ReadBuffer(base, &info, sizeof(info));
 		if(info.Frequency==0xFFFFFFFF)
 			pVfo->freq_config_RX.Frequency = frequencyBandTable[band].lower;
@@ -440,12 +442,17 @@ void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
 		Base += gEeprom.SQUELCH_LEVEL;                                        // my eeprom squelch-1
 																			  // VHF   UHF
 		EEPROM_ReadBuffer(Base + 0x00, &pInfo->SquelchOpenRSSIThresh,    1);  //  50    10
+		// Read RSSI threshold for closing squelch from EEPROM
 		EEPROM_ReadBuffer(Base + 0x10, &pInfo->SquelchCloseRSSIThresh,   1);  //  40     5
 
+		// Read noise threshold for opening squelch from EEPROM
 		EEPROM_ReadBuffer(Base + 0x20, &pInfo->SquelchOpenNoiseThresh,   1);  //  65    90
+		// Read noise threshold for closing squelch from EEPROM
 		EEPROM_ReadBuffer(Base + 0x30, &pInfo->SquelchCloseNoiseThresh,  1);  //  70   100
 
+		// Read glitch threshold for closing squelch from EEPROM
 		EEPROM_ReadBuffer(Base + 0x40, &pInfo->SquelchCloseGlitchThresh, 1);  //  90    90
+		// Read glitch threshold for opening squelch from EEPROM
 		EEPROM_ReadBuffer(Base + 0x50, &pInfo->SquelchOpenGlitchThresh,  1);  // 100   100
 
 		uint16_t rssi_open    = pInfo->SquelchOpenRSSIThresh;
@@ -506,6 +513,7 @@ void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
 	Band = FREQUENCY_GetBand(pInfo->pTX->Frequency);
 
 	uint8_t Txp[3];
+	// Read TX power configuration from EEPROM
 	EEPROM_ReadBuffer(0x1ED0 + (Band * 16) + (pInfo->OUTPUT_POWER * 3), Txp, 3);
 
 #ifdef ENABLE_REDUCE_LOW_MID_TX_POWER
@@ -586,6 +594,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
 
 	gEnableSpeaker = false;
 
+	// Turn off green LED (GPIO6 pin)
 	BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, false);
 
 	switch (Bandwidth)
@@ -595,6 +604,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
 			[[fallthrough]];
 		case BK4819_FILTER_BW_WIDE:
 		case BK4819_FILTER_BW_NARROW:
+		case BK4819_FILTER_BW_NARROWER:
 			#ifdef ENABLE_AM_FIX
 //				BK4819_SetFilterBandwidth(Bandwidth, gRxVfo->Modulation == MODULATION_AM && gSetting_AM_fix);
 				BK4819_SetFilterBandwidth(Bandwidth, true);
@@ -604,24 +614,31 @@ void RADIO_SetupRegisters(bool switchToForeground)
 			break;
 	}
 
+	// Turn off red LED (GPIO5 pin)
 	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
 
+	// Disable power amplifier
 	BK4819_SetupPowerAmplifier(0, 0);
 
+	// Disable power amplifier enable (GPIO1 pin)
 	BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, false);
 
 	while (1)
 	{
+		// Read status register (BK4819_REG_0C) to check for interrupts
 		const uint16_t Status = BK4819_ReadRegister(BK4819_REG_0C);
 		if ((Status & 1u) == 0) // INTERRUPT REQUEST
 			break;
 
+		// Write 0 to interrupt control register (BK4819_REG_02)
 		BK4819_WriteRegister(BK4819_REG_02, 0);
 		SYSTEM_DelayMs(1);
 	}
+	// Disable all interrupt masks (BK4819_REG_3F)
 	BK4819_WriteRegister(BK4819_REG_3F, 0);
 
 	// mic gain 0.5dB/step 0 to 31
+	// Configure microphone gain (BK4819_REG_7D)
 	BK4819_WriteRegister(BK4819_REG_7D, 0xE940 | (gEeprom.MIC_SENSITIVITY_TUNING & 0x1f));
 
 	uint32_t Frequency;
@@ -633,6 +650,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
 	#else
 		Frequency = gRxVfo->pRX->Frequency;
 	#endif
+	// Set RX frequency
 	BK4819_SetFrequency(Frequency);
 
 	BK4819_SetupSquelch(
@@ -642,11 +660,12 @@ void RADIO_SetupRegisters(bool switchToForeground)
 
 	BK4819_PickRXFilterPathBasedOnFrequency(Frequency);
 
-	// what does this in do ?
+	// Enable RX mode (GPIO0 pin)
 	BK4819_ToggleGpioOut(BK4819_GPIO0_PIN28_RX_ENABLE, true);
 
 	// AF RX Gain and DAC
 	//BK4819_WriteRegister(BK4819_REG_48, 0xB3A8);  // 1011 00 111010 1000
+	// Configure audio RX gain and DAC (BK4819_REG_48)
 	BK4819_WriteRegister(BK4819_REG_48,
 		(11u << 12)                 |     // ??? .. 0 ~ 15, doesn't seem to make any difference
 		( 0u << 10)                 |     // AF Rx Gain-1
@@ -771,6 +790,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
 	RADIO_SetupAGC(gRxVfo->Modulation == MODULATION_AM, false);
 
 	// enable/disable BK4819 selected interrupts
+	// Enable/disable selected BK4819 interrupts (BK4819_REG_3F)
 	BK4819_WriteRegister(BK4819_REG_3F, InterruptMask);
 
 	FUNCTION_Init();
@@ -832,6 +852,7 @@ void RADIO_SetTxParameters(void)
 
 	gEnableSpeaker = false;
 
+	// Disable RX mode (GPIO0 pin)
 	BK4819_ToggleGpioOut(BK4819_GPIO0_PIN28_RX_ENABLE, false);
 
 	switch (Bandwidth)
@@ -841,6 +862,7 @@ void RADIO_SetTxParameters(void)
 			[[fallthrough]];
 		case BK4819_FILTER_BW_WIDE:
 		case BK4819_FILTER_BW_NARROW:
+		case BK4819_FILTER_BW_NARROWER:
 			#ifdef ENABLE_AM_FIX
 //				BK4819_SetFilterBandwidth(Bandwidth, gCurrentVfo->Modulation == MODULATION_AM && gSetting_AM_fix);
 				BK4819_SetFilterBandwidth(Bandwidth, true);
@@ -850,6 +872,7 @@ void RADIO_SetTxParameters(void)
 			break;
 	}
 
+	// Set TX frequency
 	BK4819_SetFrequency(gCurrentVfo->pTX->Frequency);
 
 	// TX compressor
@@ -861,10 +884,12 @@ void RADIO_SetTxParameters(void)
 
 	BK4819_PickRXFilterPathBasedOnFrequency(gCurrentVfo->pTX->Frequency);
 
+	// Enable power amplifier (GPIO1 pin)
 	BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, true);
 
 	SYSTEM_DelayMs(5);
 
+	// Configure power amplifier with calculated settings
 	BK4819_SetupPowerAmplifier(gCurrentVfo->TXP_CalculatedSetting, gCurrentVfo->pTX->Frequency);
 
 	SYSTEM_DelayMs(10);
@@ -911,36 +936,50 @@ void RADIO_SetModulation(ModulationMode_t modulation)
 		default:
 		case MODULATION_FM:
 			mod = BK4819_AF_FM;
+			// Enable automatic frequency control (AFC)
 			BK4819_SetRegValue(afcDisableRegSpec, false);
 			break;
 		case MODULATION_AM:
 			mod = BK4819_AF_AM;
+			// Enable automatic frequency control (AFC)
 			BK4819_SetRegValue(afcDisableRegSpec, false);
+			// Configure audio gain for AM (BK4819_REG_48)
 			BK4819_WriteRegister(BK4819_REG_48, 0xB3EF);
+			// Configure AM filter (BK4819_REG_40)
 			BK4819_WriteRegister(BK4819_REG_40, (3u << 12) | 1250);
 			break;
 		case MODULATION_USB:
 			mod = BK4819_AF_BASEBAND2;
+			// Disable automatic frequency control (AFC)
 			BK4819_SetRegValue(afcDisableRegSpec, true);
+			// Configure USB filter (BK4819_REG_37)
 			BK4819_WriteRegister(BK4819_REG_37, 0x160F);
+			// Configure audio gain for USB (BK4819_REG_48)
 			BK4819_WriteRegister(BK4819_REG_48, 0xB3EF);
+			// Configure USB filter (BK4819_REG_40)
 			BK4819_WriteRegister(BK4819_REG_40, (3u << 12) | 1200);
 			break;
 		case MODULATION_LSB:
 			mod = BK4819_AF_BASEBAND2;
+			// Disable automatic frequency control (AFC)
 			BK4819_SetRegValue(afcDisableRegSpec, true);
+			// Configure LSB filter (BK4819_REG_37)
 			BK4819_WriteRegister(BK4819_REG_37, 0x160F);
+			// Configure audio gain for LSB (BK4819_REG_48)
 			BK4819_WriteRegister(BK4819_REG_48, 0xB3EF);
+			// Configure LSB filter (BK4819_REG_40)
 			BK4819_WriteRegister(BK4819_REG_40, (3u << 12) | 1200);
 			break;
 
 #ifdef ENABLE_BYP_RAW_DEMODULATORS
 		case MODULATION_BYP:
 			mod = BK4819_AF_UNKNOWN3;
+			// Disable automatic frequency control (AFC)
 			BK4819_SetRegValue(afcDisableRegSpec, true);
 			break;
 		case MODULATION_RAW:
 			mod = BK4819_AF_BASEBAND1;
+			// Disable automatic frequency control (AFC)
 			BK4819_SetRegValue(afcDisableRegSpec, true);
 			break;
 #endif
@@ -948,11 +987,14 @@ void RADIO_SetModulation(ModulationMode_t modulation)
 
 	BK4819_SetAF(mod);
 
+	// Set AF DAC gain to maximum
 	BK4819_SetRegValue(afDacGainRegSpec, 0xF);
 	
 	if (modulation == MODULATION_LSB) {
+		// Set IF selection to Zero IF for LSB mode (BK4819_REG_3D)
 		BK4819_WriteRegister(BK4819_REG_3D, 0);
 	} else {
+		// Set IF selection to ~8.46kHz IF for other modes (BK4819_REG_3D)
 		BK4819_WriteRegister(BK4819_REG_3D, 0x2AAB);
 	}
 

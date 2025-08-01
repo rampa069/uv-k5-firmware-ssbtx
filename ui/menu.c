@@ -163,10 +163,11 @@ const char gSubMenu_SFT_D[][4] =
 	"-"
 };
 
-const char gSubMenu_W_N[][7] =
+const char gSubMenu_W_N[][8] =
 {
 	"WIDE",
-	"NARROW"
+	"NARROW",
+	"NARRWR"
 };
 
 const char gSubMenu_OFF_ON[][4] =
