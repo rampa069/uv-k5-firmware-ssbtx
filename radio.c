@@ -46,6 +46,7 @@ const char gModulationStr[MODULATION_UKNOWN][4] = {
 	[MODULATION_FM]="FM",
 	[MODULATION_AM]="AM",
 	[MODULATION_USB]="USB",
+	[MODULATION_LSB]="LSB",
 
 #ifdef ENABLE_BYP_RAW_DEMODULATORS
 	[MODULATION_BYP]="BYP",
@@ -890,7 +891,7 @@ void RADIO_SetTxParameters(void)
 		BK4819_ExitSubAu();
 	}
 #ifdef ENABLE_DEVIATION
-	if (gCurrentVfo->Modulation == MODULATION_USB) {
+	if (gCurrentVfo->Modulation == MODULATION_USB || gCurrentVfo->Modulation == MODULATION_LSB) {
 		BK4819_SetupDeviation(gCurrentVfo->DeviationSSB * 0x5B);
 	}
 	else if (gCurrentVfo->Modulation == MODULATION_AM) {
@@ -910,20 +911,37 @@ void RADIO_SetModulation(ModulationMode_t modulation)
 		default:
 		case MODULATION_FM:
 			mod = BK4819_AF_FM;
+			BK4819_SetRegValue(afcDisableRegSpec, false);
 			break;
 		case MODULATION_AM:
 			mod = BK4819_AF_AM;
+			BK4819_SetRegValue(afcDisableRegSpec, false);
+			BK4819_WriteRegister(BK4819_REG_48, 0xB3EF);
+			BK4819_WriteRegister(BK4819_REG_40, (3u << 12) | 1250);
 			break;
 		case MODULATION_USB:
 			mod = BK4819_AF_BASEBAND2;
+			BK4819_SetRegValue(afcDisableRegSpec, true);
+			BK4819_WriteRegister(BK4819_REG_37, 0x160F);
+			BK4819_WriteRegister(BK4819_REG_48, 0xB3EF);
+			BK4819_WriteRegister(BK4819_REG_40, (3u << 12) | 1200);
+			break;
+		case MODULATION_LSB:
+			mod = BK4819_AF_BASEBAND2;
+			BK4819_SetRegValue(afcDisableRegSpec, true);
+			BK4819_WriteRegister(BK4819_REG_37, 0x160F);
+			BK4819_WriteRegister(BK4819_REG_48, 0xB3EF);
+			BK4819_WriteRegister(BK4819_REG_40, (3u << 12) | 1200);
 			break;
 
 #ifdef ENABLE_BYP_RAW_DEMODULATORS
 		case MODULATION_BYP:
 			mod = BK4819_AF_UNKNOWN3;
+			BK4819_SetRegValue(afcDisableRegSpec, true);
 			break;
 		case MODULATION_RAW:
 			mod = BK4819_AF_BASEBAND1;
+			BK4819_SetRegValue(afcDisableRegSpec, true);
 			break;
 #endif
 	}
@@ -931,8 +949,12 @@ void RADIO_SetModulation(ModulationMode_t modulation)
 	BK4819_SetAF(mod);
 
 	BK4819_SetRegValue(afDacGainRegSpec, 0xF);
-	BK4819_WriteRegister(BK4819_REG_3D, modulation == MODULATION_USB ? 0 : 0x2AAB);
-	BK4819_SetRegValue(afcDisableRegSpec, modulation != MODULATION_FM);
+	
+	if (modulation == MODULATION_LSB) {
+		BK4819_WriteRegister(BK4819_REG_3D, 0);
+	} else {
+		BK4819_WriteRegister(BK4819_REG_3D, 0x2AAB);
+	}
 
 	RADIO_SetupAGC(modulation == MODULATION_AM, false);
 }

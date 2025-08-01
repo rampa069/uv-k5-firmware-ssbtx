@@ -414,9 +414,18 @@ uint8_t calculateRFSignalPower(uint8_t amplitude, uint8_t maxPower, uint8_t carr
   if (carrierPercentage == 0) {
     return (uint8_t)((amplitude * maxPower) / 255);
   }
+  
   uint8_t carrierAmplitude = (carrierPercentage * maxPower) / 100;
   uint8_t modulationDepth = maxPower - carrierAmplitude;
-  return carrierAmplitude + (modulationDepth * amplitude / 255);
+  
+  uint16_t modulated = (modulationDepth * amplitude) / 255;
+  uint16_t result = carrierAmplitude + modulated;
+  
+  if (result > maxPower) {
+    result = maxPower;
+  }
+  
+  return (uint8_t)result;
 }
 #endif
 static void HandleFunction(void)
@@ -429,9 +438,9 @@ static void HandleFunction(void)
 
 		case FUNCTION_TRANSMIT:
 #ifdef ENABLE_TX_WHEN_AM
-			if (gCurrentVfo->Modulation == MODULATION_USB || gCurrentVfo->Modulation == MODULATION_AM) {
+			if (gCurrentVfo->Modulation == MODULATION_USB || gCurrentVfo->Modulation == MODULATION_LSB || gCurrentVfo->Modulation == MODULATION_AM) {
 				uint8_t val = BK4819_GetVoiceAmplitudeOut() >> 7;
-				if (gCurrentVfo->Modulation == MODULATION_USB) {
+				if (gCurrentVfo->Modulation == MODULATION_USB || gCurrentVfo->Modulation == MODULATION_LSB) {
 					val = calculateRFSignalPower(val, gCurrentVfo->TXP_CalculatedSetting, 0);
 				}
 				else {
